@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"Bard/internal/logger"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -280,6 +282,11 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, d *
 	}
 
 	data := i.ApplicationCommandData()
+	log := logger.With("master").With().
+		Str("guild", i.GuildID).
+		Str("user", i.Member.User.ID).
+		Str("cmd", data.Name).
+		Logger()
 
 	reply := func(msg string) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -290,7 +297,12 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, d *
 
 	userVoiceChannelID := func() string {
 		vs, err := s.State.VoiceState(i.GuildID, i.Member.User.ID)
-		if err != nil || vs.ChannelID == "" {
+		if err != nil {
+			log.Warn().Err(err).Msg("voice state lookup failed")
+			return ""
+		}
+		if vs.ChannelID == "" {
+			log.Warn().Msg("user has voice state but no channel ID")
 			return ""
 		}
 		return vs.ChannelID
@@ -314,14 +326,17 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, d *
 		query := data.Options[0].StringValue()
 		vcID := userVoiceChannelID()
 		if vcID == "" {
+			log.Warn().Msg("play blocked: user not in a voice channel")
 			reply("Join a voice channel first.")
 			return
 		}
 		c := d.ForChannel(vcID)
 		if c == nil {
+			log.Warn().Str("vc", vcID).Msg("play blocked: no child available for channel")
 			reply("All players are busy or unavailable.")
 			return
 		}
+		log.Info().Str("vc", vcID).Str("child", c.Address).Str("query", query).Msg("play requested")
 		// Defer immediately — yt-dlp lookup can take several seconds,
 		// and Discord requires a response within 3 seconds.
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -331,18 +346,24 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, d *
 			edit := func(msg string) {
 				s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &msg})
 			}
+			log.Info().Str("vc", vcID).Str("child", c.Address).Msg("joining voice channel")
 			if err := c.Join(i.GuildID, vcID); err != nil {
+				log.Error().Err(err).Str("vc", vcID).Str("child", c.Address).Msg("join failed")
 				edit("Could not join voice: " + err.Error())
 				return
 			}
+			log.Info().Str("query", query).Msg("searching track")
 			result, err := c.Play(i.GuildID, query)
 			if err != nil {
+				log.Error().Err(err).Str("query", query).Msg("play failed")
 				edit("Error: " + err.Error())
 				return
 			}
 			if result.Queued {
+				log.Info().Str("title", result.Title).Msg("track queued")
 				edit("Added to queue: **" + result.Title + "**")
 			} else {
+				log.Info().Str("title", result.Title).Msg("track playing")
 				edit("Now playing: **" + result.Title + "**")
 			}
 		}()
