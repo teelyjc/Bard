@@ -8,7 +8,16 @@ import (
 
 type ChildNode struct {
 	Token   string `json:"token"`
-	Address string `json:"address"`
+	Address string `json:"address"` // address the master dials to reach this child
+	Listen  string `json:"listen"`  // address the child binds to (defaults to Address)
+}
+
+// ListenAddress returns the address the child HTTP server should bind to.
+func (n *ChildNode) ListenAddress() string {
+	if n.Listen != "" {
+		return n.Listen
+	}
+	return n.Address
 }
 
 type Config struct {

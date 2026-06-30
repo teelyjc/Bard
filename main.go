@@ -128,7 +128,7 @@ func runChild(cfg *config.Config, index int) {
 	dg.AddHandlerOnce(func(s *discordgo.Session, e *discordgo.Ready) {
 		srv := child.New(s)
 		go func() {
-			if err := srv.Listen(node.Address); err != nil {
+			if err := srv.Listen(node.ListenAddress()); err != nil {
 				log.Fatal().Err(err).Msg("http server")
 			}
 		}()
