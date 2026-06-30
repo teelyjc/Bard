@@ -20,11 +20,15 @@ RUN apt-get update && \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# yt-dlp standalone binary — no Python required, handles amd64 and arm64
+# yt-dlp standalone binary — Nuitka-compiled, no Python required.
+# yt-dlp_linux (amd64 default) and arch-specific variants are all self-contained ELFs.
 ARG TARGETARCH
 RUN set -eux; \
-    BINARY="yt-dlp"; \
-    [ "${TARGETARCH}" = "arm64" ] && BINARY="yt-dlp_linux_aarch64" || true; \
+    case "${TARGETARCH}" in \
+        arm64) BINARY="yt-dlp_linux_aarch64" ;; \
+        arm)   BINARY="yt-dlp_linux_armv7l"  ;; \
+        *)     BINARY="yt-dlp_linux"          ;; \
+    esac; \
     curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${BINARY}" \
         -o /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp
