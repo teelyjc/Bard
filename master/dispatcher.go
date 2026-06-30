@@ -296,9 +296,23 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, d *
 	}
 
 	userVoiceChannelID := func() string {
+		// Try the local state cache first (fast path).
 		vs, err := s.State.VoiceState(i.GuildID, i.Member.User.ID)
+		if err == nil {
+			if vs.ChannelID == "" {
+				log.Warn().Msg("user has voice state but no channel ID")
+				return ""
+			}
+			return vs.ChannelID
+		}
+
+		// Cache miss — fall back to the REST API. This covers the case where
+		// the user was already in a VC when the bot started (the GUILD_CREATE
+		// voice state list may not include them) or a VOICE_STATE_UPDATE was missed.
+		log.Debug().Err(err).Msg("voice state cache miss, fetching from API")
+		vs, err = s.UserVoiceState(i.GuildID, i.Member.User.ID)
 		if err != nil {
-			log.Warn().Err(err).Msg("voice state lookup failed")
+			log.Warn().Err(err).Msg("voice state API lookup failed")
 			return ""
 		}
 		if vs.ChannelID == "" {
