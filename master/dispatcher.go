@@ -52,8 +52,10 @@ func (c *ChildClient) Healthy() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// ForChannel returns the child already handling channelID, or assigns the first
-// healthy free child to it. Returns nil if no child is available.
+// ForChannel returns the child already handling channelID, or assigns the
+// least-loaded healthy child to it. Each child can serve multiple guilds
+// simultaneously; load is measured by number of active channel assignments.
+// Returns nil only if every child is unreachable.
 func (d *Dispatcher) ForChannel(channelID string) *ChildClient {
 	if c, ok := d.assigned.Load(channelID); ok {
 		return c.(*ChildClient)
@@ -67,19 +69,27 @@ func (d *Dispatcher) ForChannel(channelID string) *ChildClient {
 		return c.(*ChildClient)
 	}
 
-	busy := make(map[*ChildClient]bool)
+	// Count active sessions per child.
+	load := make(map[*ChildClient]int, len(d.children))
 	d.assigned.Range(func(_, v any) bool {
-		busy[v.(*ChildClient)] = true
+		load[v.(*ChildClient)]++
 		return true
 	})
 
+	// Pick the healthy child with the fewest active sessions.
+	var best *ChildClient
+	bestLoad := int(^uint(0) >> 1) // max int
 	for _, c := range d.children {
-		if !busy[c] && c.Healthy() {
-			d.assigned.Store(channelID, c)
-			return c
+		if c.Healthy() && load[c] < bestLoad {
+			best = c
+			bestLoad = load[c]
 		}
 	}
-	return nil // all children occupied or unreachable
+	if best == nil {
+		return nil // all children unreachable
+	}
+	d.assigned.Store(channelID, best)
+	return best
 }
 
 // Release frees the child assigned to channelID back into the pool.

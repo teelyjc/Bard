@@ -54,6 +54,7 @@ type Player struct {
 	log     zerolog.Logger
 	guildID string
 	vc      *discordgo.VoiceConnection
+	onIdle  func() // called once when the queue drains and the player goes idle
 
 	queue   []ytdlp.Track
 	current *ytdlp.Track
@@ -63,15 +64,25 @@ type Player struct {
 	unpauseCh chan struct{}
 }
 
-// New creates a Player for the given guild using the provided voice connection.
-func New(guildID string, vc *discordgo.VoiceConnection) *Player {
+// New creates a Player for the given guild. onIdle is called (in its own
+// goroutine) when the queue empties after natural playback or a skip — not
+// after an explicit Stop.
+func New(guildID string, vc *discordgo.VoiceConnection, onIdle func()) *Player {
 	return &Player{
 		log:       logger.With("audio").With().Str("guild", guildID).Logger(),
 		guildID:   guildID,
 		vc:        vc,
+		onIdle:    onIdle,
 		stopCh:    make(chan struct{}),
 		unpauseCh: make(chan struct{}),
 	}
+}
+
+// IsIdle reports whether the player has nothing playing and an empty queue.
+func (p *Player) IsIdle() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.current == nil && len(p.queue) == 0
 }
 
 // Enqueue appends tracks to the queue. Returns true if the queue was empty
@@ -85,11 +96,17 @@ func (p *Player) Enqueue(tracks ...ytdlp.Track) bool {
 }
 
 // PlayNext dequeues the next track and begins streaming it in a goroutine.
+// When the queue is empty it fires onIdle (if set) so the caller can
+// disconnect from voice.
 func (p *Player) PlayNext() {
 	p.mu.Lock()
 	if len(p.queue) == 0 {
 		p.current = nil
+		onIdle := p.onIdle
 		p.mu.Unlock()
+		if onIdle != nil {
+			go onIdle()
+		}
 		return
 	}
 	track := p.queue[0]

@@ -142,7 +142,10 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, _ := s.players.LoadOrStore(req.GuildID, audio.New(req.GuildID, vc))
+	guildID := req.GuildID
+	p, _ := s.players.LoadOrStore(guildID, audio.New(guildID, vc, func() {
+		s.onPlayerIdle(guildID)
+	}))
 	player := p.(*audio.Player)
 
 	wasEmpty := player.Enqueue(*track)
@@ -233,5 +236,27 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) destroyPlayer(guildID string) {
 	if p, ok := s.players.LoadAndDelete(guildID); ok {
 		p.(*audio.Player).Stop()
+	}
+}
+
+// onPlayerIdle is called by the Player when its queue drains naturally.
+// It disconnects from voice and removes the player so the child is free for
+// the next /play on that guild.
+func (s *Server) onPlayerIdle(guildID string) {
+	log := logger.With("child")
+
+	// Guard: a new track may have been queued in the window between the last
+	// track ending and this callback firing.
+	if p, ok := s.players.Load(guildID); ok {
+		if !p.(*audio.Player).IsIdle() {
+			return
+		}
+	}
+
+	s.destroyPlayer(guildID)
+
+	if vc, ok := s.voiceConns.LoadAndDelete(guildID); ok {
+		vc.(*discordgo.VoiceConnection).Disconnect()
+		log.Info().Str("guild", guildID).Msg("queue empty, left voice channel")
 	}
 }
