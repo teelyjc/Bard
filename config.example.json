@@ -1,0 +1,20 @@
+{
+  "configs": {
+    "master": {
+      "token": "",
+      "monitor_address": ""
+    },
+    "child": {
+      "nodes": [
+        {
+          "token": "",
+          "address": ""
+        },
+        {
+          "token": "",
+          "address": ""
+        }
+      ]
+    }
+  }
+}
